@@ -1,0 +1,63 @@
+provider "aws" {
+  region = "us-west-2"
+}
+
+# DynamoDB Table Name
+variable "dynamodb_table" {
+  default = "ServerNames"
+}
+
+# Route 53 Zone ID
+variable "route53_zone_id" {
+  default = "Z1234567890"
+}
+
+# Fetch the current highest server name
+data "aws_dynamodb_table_item" "current_name" {
+  table_name = var.dynamodb_table
+  key = {
+    ServerName = { S = "current" }
+  }
+}
+
+locals {
+  current_number = length(data.aws_dynamodb_table_item.current_name.items) > 0 ? tonumber(data.aws_dynamodb_table_item.current_name.items[0].attrs.Number.N) : 0
+  new_number     = local.current_number + 1
+  server_name    = "abc${local.new_number}"
+}
+
+# Create EC2 Instance
+resource "aws_instance" "example" {
+  ami           = "ami-0c55b159cbfafe1f0" # Replace with your preferred AMI ID
+  instance_type = "t2.micro"
+
+  tags = {
+    Name = local.server_name
+  }
+}
+
+# Update DynamoDB with the new server name
+resource "aws_dynamodb_table_item" "update_name" {
+  table_name = var.dynamodb_table
+  hash_key   = "ServerName"
+
+  item = <<ITEM
+{
+  "ServerName": {"S": "current"},
+  "Number": {"N": "${local.new_number}"}
+}
+ITEM
+}
+
+# Register the new server in Route 53
+resource "aws_route53_record" "new_server" {
+  zone_id = var.route53_zone_id
+  name    = "${local.server_name}.example.com"
+  type    = "A"
+  ttl     = "300"
+  records = [aws_instance.example.public_ip]
+}
+
+output "server_name" {
+  value = local.server_name
+}
